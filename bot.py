@@ -2,7 +2,7 @@ import os
 import aiohttp
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, ReplyKeyboardRemove
 
 API_ID = int(os.environ.get("API_ID", 23644766))  # Set in Heroku config vars
 API_HASH = os.environ.get("API_HASH", "9dc15dd41be1a26016b2ebac611868f5")
@@ -30,8 +30,19 @@ async def download_pdf(url, dest):
         print(f"Download failed for {url}: {e}")
     return False
 
+stop_requested = False
+
+@app.on_message(filters.command("stop") & filters.private)
+async def stop_command(client: Client, message: Message):
+    global stop_requested
+    stop_requested = True
+    await message.reply("⏹️ Stopping the current operation.", reply_markup=ReplyKeyboardRemove())
+
 @app.on_message(filters.document & filters.private)
 async def handle_txt_file(client: Client, message: Message):
+    global stop_requested
+    stop_requested = False  # Reset stop flag at the start
+
     if not message.document.file_name.endswith(".txt"):
         await message.reply("Please send a .txt file containing PDF URLs.")
         return
@@ -46,7 +57,6 @@ async def handle_txt_file(client: Client, message: Message):
             if not line:
                 continue
             if ":" in line:
-                # Split only on the last colon to support colons in the title
                 parts = line.rsplit(":", 1)
                 if len(parts) == 2:
                     caption, url = parts
@@ -54,12 +64,15 @@ async def handle_txt_file(client: Client, message: Message):
                     url = url.strip()
                     entries.append((caption, url))
             else:
-                # Fallback: treat the whole line as URL
-                entries.append(("", line))
+                url = line
+                entries.append(("", url))
 
     await message.reply(f"Found {len(entries)} URLs. Starting download and upload...")
 
     for caption, url in entries:
+        if stop_requested:
+            await message.reply("⏹️ Operation stopped by user.")
+            break
         pdf_name = url.split("/")[-1].split("?")[0]
         if not pdf_name.lower().endswith(".pdf"):
             pdf_name += ".pdf"
@@ -74,7 +87,10 @@ async def handle_txt_file(client: Client, message: Message):
             await message.reply(f"Failed to download: {url}")
 
     os.remove(txt_path)
-    await message.reply("✅ All done!")
+    if not stop_requested:
+        await message.reply("✅ All done!")
+    else:
+        await message.reply("Stopped before completing all files.")
 
 if __name__ == "__main__":
     app.run()
