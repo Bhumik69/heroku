@@ -39,21 +39,36 @@ async def handle_txt_file(client: Client, message: Message):
     txt_path = os.path.join(DOWNLOAD_DIR, message.document.file_name)
     await message.download(txt_path)
 
+    entries = []
     with open(txt_path, "r", encoding="utf-8") as f:
-        urls = [line.strip() for line in f if line.strip()]
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if ":" in line:
+                # Split only on the last colon to support colons in the title
+                parts = line.rsplit(":", 1)
+                if len(parts) == 2:
+                    caption, url = parts
+                    caption = caption.strip()
+                    url = url.strip()
+                    entries.append((caption, url))
+            else:
+                # Fallback: treat the whole line as URL
+                entries.append(("", line))
 
-    await message.reply(f"Found {len(urls)} URLs. Starting download and upload...")
+    await message.reply(f"Found {len(entries)} URLs. Starting download and upload...")
 
-    for url in urls:
+    for caption, url in entries:
         pdf_name = url.split("/")[-1].split("?")[0]
         if not pdf_name.lower().endswith(".pdf"):
             pdf_name += ".pdf"
         pdf_path = os.path.join(DOWNLOAD_DIR, pdf_name)
-        await message.reply(f"Downloading: {pdf_name}")
+        await message.reply(f"Downloading: {caption or pdf_name}")
         success = await download_pdf(url, pdf_path)
         if success:
-            await client.send_document(CHANNEL_ID, pdf_path, caption=pdf_name)
-            await message.reply(f"Uploaded: {pdf_name}")
+            await client.send_document(CHANNEL_ID, pdf_path, caption=caption or pdf_name)
+            await message.reply(f"Uploaded: {caption or pdf_name}")
             os.remove(pdf_path)
         else:
             await message.reply(f"Failed to download: {url}")
